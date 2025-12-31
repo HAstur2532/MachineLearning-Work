@@ -9,7 +9,7 @@ from models.BaseModel import GeneralModel
 from models.BaseImpressionModel import ImpressionModel
 
 """ 
-SANSA（Embedding化重构版，训练/预测效率对齐BPRMF）
+SANSA
 核心：用Embedding查表替代大矩阵运算，复杂度O(batch_size×emb_size)
 """
 
@@ -36,7 +36,6 @@ class SANSABase(object):
         torch.manual_seed(self.seed)
 
         # ========== 核心：仅初始化Embedding（无大矩阵） ==========
-        # SANSA核心语义：物品侧双Embedding（模拟L/P的低秩分解）
         self.item_emb_L = nn.Embedding(self.item_num, self.emb_size)  # 对应原L
         self.item_emb_P = nn.Embedding(self.item_num, self.emb_size)  # 对应原P
         self.D = nn.Parameter(torch.ones(self.emb_size, device=self.device))  # 对应原D
@@ -54,20 +53,19 @@ class SANSABase(object):
         nn.init.constant_(self.D, 1.0)
 
     def _prestore_user_pos(self, corpus):
-        """修复：适配亚马逊Grocery_and_Gourmet_Food数据集的corpus格式"""
         user_pos = {}
-        # 步骤1：适配数据集的交互物品字段（优先尝试以下4种常见格式）
+        # 步骤1：适配数据集的交互物品字段
         if hasattr(corpus, 'train_user_dict'):
-            # 格式1：train_user_dict（最常见）
+            # 格式1：train_user_dict
             user_item_dict = corpus.train_user_dict
         elif hasattr(corpus, 'user_items'):
             # 格式2：user_items
             user_item_dict = corpus.user_items
         elif hasattr(corpus, 'test_user_dict'):
-            # 格式3：test_user_dict（兜底）
+            # 格式3：test_user_dict
             user_item_dict = corpus.test_user_dict
         elif hasattr(corpus, 'ratings'):
-            # 格式4：ratings（评分数据转字典）
+            # 格式4：ratings
             user_item_dict = {}
             for (u, i, r) in corpus.ratings:
                 if u not in user_item_dict:
@@ -82,23 +80,19 @@ class SANSABase(object):
         # 步骤2：填充user_pos，确保每个用户有非空交互物品
         for user_id in range(self.user_num):
             if user_id in user_item_dict:
-                # 过滤无效物品ID（如超出范围）
+                # 过滤无效物品ID
                 pos_items = [i for i in user_item_dict[user_id] if 0 <= i < self.item_num]
             else:
                 pos_items = []
 
-            # 兜底：无交互物品时，随机选1个物品
             if len(pos_items) == 0:
                 pos_items = [np.random.randint(0, self.item_num)]
 
             user_pos[user_id] = pos_items
 
-        # 调试：打印前3个用户的交互物品（确认非空）
-
         return user_pos
 
     def forward(self, feed_dict):
-        """Embedding化前向传播（效率≈BPRMF）"""
         self.check_list = []
 
         # 1. 解析输入
@@ -108,7 +102,7 @@ class SANSABase(object):
         device = u_ids.device
 
 
-        # 2. 核心优化：用户交互Embedding聚合（替代one-hot+大矩阵乘法）
+        # 2. 核心优化：用户交互Embedding聚合
         user_agg_emb = torch.zeros((batch_size, self.emb_size), device=device)
         for idx, u in enumerate(u_ids.cpu().numpy()):
             pos_items = self.user_pos_items.get(u, [])
@@ -117,12 +111,9 @@ class SANSABase(object):
                 pos_emb = self.item_emb_L(torch.tensor(pos_items, device=device))  # [n_pos, emb_size]
                 user_agg_emb[idx] = pos_emb.mean(dim=0)  # 均值聚合（替代one-hot加权）
 
-        # 3. SANSA核心计算（Embedding内积，无大矩阵）
-        # 物品P Embedding查表（目标物品）
+        # 3. SANSA核心计算
         target_item_emb_P = self.item_emb_P(i_ids)  # [batch_size, n_target, emb_size]
-        # D对角元加权（替代D_inv大矩阵）
         user_agg_emb = user_agg_emb / (self.D + 1e-8)  # [batch_size, emb_size]
-        # 最终评分：内积（替代两次大矩阵乘法）
         scores = torch.einsum('be,bte->bt', user_agg_emb, target_item_emb_P)  # [batch_size, n_target]
 
         # 4. 兼容输出格式
@@ -132,8 +123,6 @@ class SANSABase(object):
 
         return {'prediction': prediction, 'u_v': u_v, 'i_v': i_v}
 
-
-# ======================== 适配GeneralModel ========================
 class SANSA(GeneralModel, SANSABase):
     reader = 'BaseReader'
     runner = 'BaseRunner'
