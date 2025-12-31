@@ -1,12 +1,9 @@
 # -*- coding: UTF-8 -*-
 import numpy as np
-import scipy.sparse as sp
 import torch
 import torch.nn as nn
-import pickle
-import os
-from models.BaseModel import GeneralModel
 from models.BaseImpressionModel import ImpressionModel
+from models.BaseModel import GeneralModel
 
 """ 
 SANSA
