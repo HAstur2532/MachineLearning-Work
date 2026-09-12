@@ -35,3 +35,5 @@ SANSA 是对 EASE 的稀疏化、因子化改进，通过稀疏近似 Cholesky �
 
 ```bash
 python main.py --model_name SANSA
+
+类似地，可通过 --model_name BPRMF 或 --model_name BUIR 运行对比模型。
